@@ -1,0 +1,43 @@
+# Render Blueprint for the Unichat API. The web app is deployed separately on Vercel (see docs/DEPLOY.md).
+# DEMO profile: runs without Cloudinary/SMTP (NODE_ENV=staging). For a hardened production profile set NODE_ENV=production
+# and provide the variables listed in docs/PRODUCTION.md.
+services:
+  - type: web
+    name: unichat-api
+    runtime: node
+    rootDir: backend
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.12.0
+      - key: NODE_ENV
+        value: staging
+      - key: MONGODB_URI # MongoDB Atlas connection string (set in the Render dashboard)
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: PASSWORD_RESET_PEPPER
+        generateValue: true
+      - key: PUBLIC_API_URL # https://<this-service>.onrender.com/api
+        sync: false
+      - key: CLIENT_URL # https://<your-app>.vercel.app
+        sync: false
+      - key: ALLOWED_ORIGINS # same as CLIENT_URL, exact origin, no trailing slash
+        sync: false
+      - key: COOKIE_SAMESITE
+        value: none
+      - key: TRUST_PROXY_HOPS
+        value: "1"
+      - key: REQUIRE_EMAIL_VERIFICATION
+        value: "false"
+      - key: EMAIL_TRANSPORT
+        value: file
+      - key: FILE_STORAGE
+        value: local
+      - key: AUTO_JOIN_DEFAULT_WORKSPACE
+        value: "false"

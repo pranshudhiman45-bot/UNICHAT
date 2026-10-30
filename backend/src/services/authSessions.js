@@ -12,11 +12,14 @@ function isCookieClient(req) {
   return req.get('X-Client-Auth') === 'cookie';
 }
 
+// Default is SameSite=Strict. When the web app and the API live on different sites (for example Vercel + Render) the
+// browser would drop a Strict cookie, so COOKIE_SAMESITE=none opts in to a cross-site cookie (always Secure).
 function refreshCookieOptions(clear = false) {
+  const crossSite = process.env.COOKIE_SAMESITE === 'none';
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
+    secure: crossSite || process.env.NODE_ENV === 'production',
+    sameSite: crossSite ? 'none' : 'strict',
     path: '/api/auth',
     ...(!clear ? { maxAge: Number(process.env.JWT_REFRESH_COOKIE_MAX_AGE_MS) || 30 * 24 * 60 * 60 * 1000 } : {}),
   };

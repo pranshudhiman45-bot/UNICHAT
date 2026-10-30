@@ -112,6 +112,7 @@ npm run test:e2e        # Playwright browser tests (restart the backend first; l
 
 ## More documentation
 
+- [docs/DEPLOY.md](docs/DEPLOY.md): deploy the web on Vercel and the API on Render
 - [docs/SETUP.md](docs/SETUP.md): local setup, Google sign-in, Gmail OTP, deployment
 - [docs/PRODUCTION.md](docs/PRODUCTION.md): deployment checklist and environment reference
 - [docs/SOCKET_SECURITY.md](docs/SOCKET_SECURITY.md): per-event socket authorization

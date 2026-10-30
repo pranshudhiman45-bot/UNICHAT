@@ -92,6 +92,8 @@ app.use(morgan(':method :request-path :status :response-time ms'));
 // Messages are capped well below 1 MB (40k chars + 120k rich-text chars); file uploads use multipart, not JSON.
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '100kb' }));
+// Unauthenticated liveness probe for the hosting platform (registered before the HTTPS/origin guards).
+app.get('/api/health', (req, res) => res.json({ ok: true }));
 app.use('/api', (req, res, next) => {
   if (process.env.NODE_ENV === 'production' && !req.secure) return res.status(426).json({ error: 'HTTPS required' });
   if (req.get('Origin') && !isAllowedOrigin(req.get('Origin'))) return res.status(403).json({ error: 'Origin not allowed' });
