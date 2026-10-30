@@ -1,0 +1,206 @@
+const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
+const mongoose = require('mongoose');
+const { OAuth2Client } = require('google-auth-library');
+const dbName = `unichat_identity_test_${crypto.randomBytes(6).toString('hex')}`;
+Object.assign(process.env, {
+  NODE_ENV: 'test', MONGODB_URI: `mongodb://127.0.0.1:27017/${dbName}`,
+  JWT_SECRET: crypto.randomBytes(48).toString('hex'), JWT_REFRESH_SECRET: crypto.randomBytes(48).toString('hex'),
+  ALLOWED_REGISTRATION_DOMAIN: '', AUTO_JOIN_DEFAULT_WORKSPACE: 'false', WORKSPACE_CREATION: 'members', REQUIRE_EMAIL_VERIFICATION: 'true', PASSWORD_RECOVERY_MODE: 'email', EMAIL_TRANSPORT: 'file', FILE_STORAGE: 'local',
+  REFRESH_REUSE_WINDOW_SECONDS: '0', ADMIN_EMAIL: '', ADMIN_PASSWORD_HASH: '', REDIS_URL: '', TRUST_PROXY_HOPS: '1', ALLOWED_ORIGINS: 'http://localhost:5173', GOOGLE_CLIENT_IDS: 'test.apps.googleusercontent.com', GOOGLE_WEB_CLIENT_ID: 'test.apps.googleusercontent.com',
+});
+let server, directory, base, number = 0;
+let restoreGoogle;
+const password = 'A memorable test passphrase 42!';
+async function call(route, { method = 'GET', body, token, headers = {} } = {}) {
+  const response = await fetch(`${base}${route}`, { method, headers: { 'content-type': 'application/json', 'x-forwarded-for': `198.51.100.${++number % 200 + 1}`, ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
+  return { status: response.status, body: await response.json().catch(() => ({})), headers: response.headers };
+}
+function expect(result, status) { assert.equal(result.status, status, JSON.stringify(result.body)); return result.body; }
+async function latestCode(email, subject) {
+  const files = (await fs.readdir(directory)).filter((name) => name.endsWith('.json')).sort().reverse();
+  for (const filename of files) { const mail = JSON.parse(await fs.readFile(path.join(directory, filename), 'utf8')); if (mail.to === email && mail.subject.includes(subject)) return mail.text.match(/\b\d{6}\b/)[0]; }
+  throw new Error('No matching test email');
+}
+async function run() {
+  directory = await fs.mkdtemp(path.join(os.tmpdir(), 'unichat-mail-'));
+  process.env.DEV_EMAIL_DIR = directory;
+  process.env.LOCAL_UPLOAD_DIR = path.join(directory, 'uploads');
+  const { app } = require('../src/index');
+  const User = require('../src/models/User');
+  const Workspace = require('../src/models/Workspace');
+  const Channel = require('../src/models/Channel');
+  const Notification = require('../src/models/Notification');
+  const EmailChallenge = require('../src/models/EmailChallenge');
+  const PasswordResetRequest = require('../src/models/PasswordResetRequest');
+  await mongoose.connect(process.env.MONGODB_URI);
+  await Promise.all([User.init(), Workspace.init(), Channel.init(), Notification.init(), EmailChallenge.init(), PasswordResetRequest.init()]);
+  server = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  base = `http://127.0.0.1:${server.address().port}/api`;
+  process.env.PUBLIC_API_URL = base;
+  const email = 'owner@example.test';
+  const registration = { email, username: 'workspace_owner', displayName: 'Workspace Owner', password };
+  const invalidUsername = expect(await call('/auth/register', { method: 'POST', body: { ...registration, username: 'someone@gmail.com' } }), 400);
+  assert.match(invalidUsername.error, /Username can only contain/);
+  assert.equal(invalidUsername.details[0].field, 'username');
+  const invalidPassword = expect(await call('/auth/register', { method: 'POST', body: { ...registration, password: 'short' } }), 400);
+  assert.equal(invalidPassword.details[0].field, 'password');
+  assert.ok(!JSON.stringify(invalidPassword).includes('short'), 'Never reflect submitted passwords in validation errors');
+  process.env.REQUIRE_EMAIL_VERIFICATION = 'false';
+  const withoutOtp = expect(await call('/auth/register', { method: 'POST', body: { ...registration, email: 'no-otp@example.test', username: 'no_otp_user' } }), 201);
+  assert.ok(withoutOtp.accessToken, 'Registration works without an OTP when local verification is disabled');
+  assert.equal((await User.findById(withoutOtp.user._id)).emailVerifiedAt, null);
+  process.env.REQUIRE_EMAIL_VERIFICATION = 'true';
+  expect(await call('/auth/register', { method: 'POST', body: registration }), 400);
+  expect(await call('/auth/email-verification/request', { method: 'POST', body: { email } }), 200);
+  const code = await latestCode(email, 'Verify');
+  assert.equal((await fs.readdir(directory)).length, 1);
+  expect(await call('/auth/email-verification/request', { method: 'POST', body: { email } }), 200);
+  assert.equal((await fs.readdir(directory)).length, 1, 'Resend cooldown prevents duplicate email');
+  expect(await call('/auth/email-verification/verify', { method: 'POST', body: { email, code: 'wrong' } }), 400);
+  const proof = expect(await call('/auth/email-verification/verify', { method: 'POST', body: { email, code } }), 200).emailVerificationToken;
+  expect(await call('/auth/email-verification/verify', { method: 'POST', body: { email, code } }), 400);
+  expect(await call('/auth/register', { method: 'POST', body: { ...registration, email: 'other@example.test', emailVerificationToken: proof } }), 400);
+  const owner = expect(await call('/auth/register', { method: 'POST', body: { ...registration, emailVerificationToken: proof } }), 201);
+  assert.equal(await EmailChallenge.countDocuments({ email }), 0, 'Registration consumes proof');
+  assert.equal(expect(await call('/workspaces', { token: owner.accessToken }), 200).workspaces.length, 0, 'No implicit company access');
+  const ws = expect(await call('/workspaces', { method: 'POST', token: owner.accessToken, body: { name: 'Design Team', description: 'Test workspace' } }), 201).workspace;
+  const second = expect(await call('/workspaces', { method: 'POST', token: owner.accessToken, body: { name: 'Design Team' } }), 201).workspace;
+  assert.notEqual(ws.slug, second.slug, 'Same display name is allowed');
+  expect(await call('/workspaces', { method: 'POST', token: owner.accessToken, body: { name: '   ' } }), 400);
+  expect(await call('/workspaces/not-an-id', { token: owner.accessToken }), 404);
+  const outsiderDoc = await User.create({ email: 'member@example.test', username: 'workspace_member', displayName: 'Member', password });
+  const outsider = expect(await call('/auth/login', { method: 'POST', body: { email: outsiderDoc.email, password } }), 200);
+  expect(await call(`/workspaces/${ws._id}`, { token: outsider.accessToken }), 403);
+  expect(await call(`/workspaces/${ws._id}`, { method: 'PATCH', token: outsider.accessToken, body: { name: 'Hijacked' } }), 403);
+  const joins = await Promise.all(Array.from({ length: 5 }, () => call(`/workspaces/join/${ws.inviteCode}`, { method: 'POST', token: outsider.accessToken })));
+  joins.forEach((result) => expect(result, 202));
+  const requestId = joins[0].body.request._id;
+  assert.equal(new Set(joins.map(result => result.body.request._id)).size, 1, 'Concurrent submissions share one request');
+  assert.equal((await Workspace.findById(ws._id)).isMember(outsiderDoc._id), false);
+  assert.equal(await Notification.countDocuments({ type: 'workspace_join_request', recipient: owner.user._id }), 1, 'One durable admin notification');
+  expect(await call(`/workspaces/${ws._id}`, { token: outsider.accessToken }), 403);
+  const defaultChannel = await Channel.findOne({ workspace: ws._id, name: 'general' });
+  expect(await call(`/messages/channel/${defaultChannel._id}`, { token: outsider.accessToken }), 403);
+  expect(await call(`/workspaces/${ws._id}/join-requests`, { token: outsider.accessToken }), 403);
+  expect(await call(`/workspaces/${ws._id}/join-requests/${requestId}/approve`, { method: 'POST', token: outsider.accessToken }), 403);
+  const ownRequests = expect(await call('/workspaces/join-requests', { token: outsider.accessToken }), 200).requests;
+  assert.equal(ownRequests[0].status, 'pending');
+  assert.deepEqual(Object.keys(ownRequests[0].workspace).sort(), ['_id', 'icon', 'name']);
+  const queue = expect(await call(`/workspaces/${ws._id}/join-requests`, { token: owner.accessToken }), 200).requests;
+  assert.equal(queue.length, 1); assert.equal(queue[0].user.email, outsiderDoc.email);
+  assert.equal(expect(await call('/workspaces', { token: owner.accessToken }), 200).workspaces.find(w => w._id === ws._id).pendingJoinRequestCount, 1);
+  const approvals = await Promise.all(Array.from({ length: 3 }, () => call(`/workspaces/${ws._id}/join-requests/${requestId}/approve`, { method: 'POST', token: owner.accessToken })));
+  approvals.forEach(result => expect(result, 200));
+  assert.equal(expect(await call(`/workspaces/${ws._id}`, { token: outsider.accessToken }), 200).workspace.joinRequests, undefined, 'Applicant data is not leaked to ordinary members');
+  expect(await call(`/workspaces/${ws._id}/join-requests/${requestId}/reject`, { method: 'POST', token: owner.accessToken }), 409);
+  assert.equal((await Notification.findOne({ type: 'workspace_join_request', recipient: owner.user._id })).isRead, true);
+  const joined = await Workspace.findById(ws._id);
+  assert.equal(joined.members.filter((member) => String(member.user) === String(outsiderDoc._id)).length, 1);
+  for (const channel of await Channel.find({ workspace: ws._id })) assert.equal(channel.members.filter((member) => String(member.user) === String(outsiderDoc._id)).length, 1);
+  assert.equal(expect(await call(`/workspaces/join/${ws.inviteCode}`, { method: 'POST', token: outsider.accessToken }), 200).alreadyMember, true);
+  expect(await call(`/workspaces/${ws._id}`, { method: 'PUT', token: owner.accessToken, body: { name: ' ' } }), 400);
+  expect(await call(`/workspaces/${ws._id}`, { method: 'PATCH', token: owner.accessToken, body: { name: 'Better Team' } }), 200);
+  const oldInvite = ws.inviteCode;
+  expect(await call(`/workspaces/${ws._id}/regenerate-invite`, { method: 'POST', token: owner.accessToken }), 200);
+  expect(await call(`/workspaces/join/${oldInvite}`, { method: 'POST', token: outsider.accessToken }), 404);
+  const { createSession } = require('../src/services/authSessions');
+  const declinedUser = await User.create({ email: 'declined@example.test', username: 'declined', displayName: 'Declined Applicant', password });
+  const declinedSession = await createSession(declinedUser);
+  const currentInvite = (await Workspace.findById(ws._id)).inviteCode;
+  const declinedRequest = expect(await call(`/workspaces/join/${currentInvite}`, { method: 'POST', token: declinedSession.accessToken }), 202).request;
+  expect(await call(`/workspaces/${ws._id}/join-requests/${declinedRequest._id}/reject`, { method: 'POST', token: outsider.accessToken }), 403, 'Ordinary member cannot decide');
+  expect(await call(`/workspaces/${ws._id}/join-requests/${declinedRequest._id}/reject`, { method: 'POST', token: owner.accessToken }), 200);
+  expect(await call(`/workspaces/${ws._id}/join-requests/${declinedRequest._id}/approve`, { method: 'POST', token: owner.accessToken }), 409);
+  assert.equal(expect(await call('/workspaces/join-requests', { token: declinedSession.accessToken }), 200).requests[0].status, 'rejected');
+  expect(await call(`/workspaces/${ws._id}`, { token: declinedSession.accessToken }), 403);
+  // A declined person may ask again only after the 24-hour cooldown; until then the answer is 429 and the rejection is returned.
+  const cooling = expect(await call(`/workspaces/join/${currentInvite}`, { method: 'POST', token: declinedSession.accessToken }), 429);
+  assert.equal(cooling.code, 'JOIN_COOLDOWN'); assert.equal(cooling.request.status, 'rejected');
+  const raceUser = await User.create({ email: 'race@example.test', username: 'race', displayName: 'Race Applicant', password });
+  const raceSession = await createSession(raceUser);
+  const raceRequest = expect(await call(`/workspaces/join/${currentInvite}`, { method: 'POST', token: raceSession.accessToken }), 202).request;
+  const decisions = await Promise.all(['approve', 'reject'].map(decision => call(`/workspaces/${ws._id}/join-requests/${raceRequest._id}/${decision}`, { method: 'POST', token: owner.accessToken })));
+  assert.deepEqual(decisions.map(result => result.status).sort(), [200, 409]);
+  const raceWorkspace = await Workspace.findById(ws._id).select('+joinRequests');
+  assert.equal(raceWorkspace.isMember(raceUser._id), raceWorkspace.joinRequests.id(raceRequest._id).status === 'approved', 'Admission and decision stay atomic');
+  // Archived workspaces cannot admit pending applicants.
+  const archiveRequest = expect(await call(`/workspaces/join/${second.inviteCode}`, { method: 'POST', token: raceSession.accessToken }), 202).request;
+  await Workspace.updateOne({ _id: second._id }, { $set: { isArchived: true } });
+  expect(await call(`/workspaces/${second._id}/join-requests/${archiveRequest._id}/approve`, { method: 'POST', token: owner.accessToken }), 404);
+  await Workspace.updateOne({ _id: second._id }, { $set: { isArchived: false } });
+  const refreshed = expect(await call('/auth/refresh', { method: 'POST', body: { refreshToken: owner.refreshToken } }), 200);
+  assert.notEqual(refreshed.refreshToken, owner.refreshToken, 'Immediate refresh must rotate token');
+  expect(await call('/auth/refresh', { method: 'POST', body: { refreshToken: owner.refreshToken } }), 401);
+  const login = expect(await call('/auth/login', { method: 'POST', body: { email, password } }), 200);
+  expect(await call('/auth/logout', { method: 'POST', token: login.accessToken }), 200);
+  expect(await call('/auth/me', { token: login.accessToken }), 401);
+  const resetExisting = expect(await call('/auth/password-resets/request', { method: 'POST', body: { email } }), 200);
+  const resetMissing = expect(await call('/auth/password-resets/request', { method: 'POST', body: { email: 'missing@example.test' } }), 200);
+  assert.deepEqual(resetExisting, resetMissing, 'Do not disclose account existence');
+  const resetCode = await latestCode(email, 'Reset');
+  expect(await call('/auth/password-resets/verify', { method: 'POST', body: { email, code: '000000' } }), 400);
+  const resetToken = expect(await call('/auth/password-resets/verify', { method: 'POST', body: { email, code: resetCode } }), 200).resetToken;
+  const newPassword = 'My new secure test passphrase 99';
+  expect(await call('/auth/password-resets/complete', { method: 'POST', body: { email, resetToken, password: newPassword, confirmPassword: newPassword } }), 200);
+  expect(await call('/auth/password-resets/complete', { method: 'POST', body: { email, resetToken, password: newPassword, confirmPassword: newPassword } }), 400);
+  expect(await call('/auth/me', { token: refreshed.accessToken }), 401);
+  expect(await call('/auth/refresh', { method: 'POST', body: { refreshToken: refreshed.refreshToken } }), 401);
+  expect(await call('/auth/login', { method: 'POST', body: { email, password } }), 401);
+  const newSession = expect(await call('/auth/login', { method: 'POST', body: { email, password: newPassword } }), 200);
+  expect(await call('/users/password', { method: 'PUT', token: newSession.accessToken, body: { currentPassword: newPassword, newPassword: 'short' } }), 400);
+  expect(await call('/users/password', { method: 'PUT', token: newSession.accessToken, body: { currentPassword: newPassword, newPassword: password } }), 200);
+  expect(await call('/auth/me', { token: newSession.accessToken }), 401);
+  // Invalid Google tokens go through the actual Google verification library.
+  expect(await call('/auth/google', { method: 'POST', body: { credential: 'not-a-token' } }), 401);
+  // Provider-independent account/linking behavior: only this test replaces the verifier.
+  const original = OAuth2Client.prototype.verifyIdToken;
+  restoreGoogle = () => { OAuth2Client.prototype.verifyIdToken = original; };
+  let claims = { sub: 'google-subject-123', email: 'new.google@gmail.com', email_verified: true, name: 'Google Member' };
+  OAuth2Client.prototype.verifyIdToken = async () => ({ getPayload: () => claims });
+  const google = expect(await call('/auth/google', { method: 'POST', body: { credential: 'test-fixture' } }), 200);
+  const repeat = expect(await call('/auth/google', { method: 'POST', body: { credential: 'test-fixture' } }), 200);
+  assert.equal(google.user._id, repeat.user._id, 'Google subject determines identity');
+  claims = { ...claims, sub: 'unverified', email_verified: false };
+  expect(await call('/auth/google', { method: 'POST', body: { credential: 'test-fixture' } }), 401);
+  claims = { ...claims, sub: 'third-party-google', email: 'thirdparty@example.test', email_verified: true };
+  assert.equal(expect(await call('/auth/google', { method: 'POST', body: { credential: 'test-fixture' } }), 409).code, 'EMAIL_VERIFICATION_REQUIRED');
+  claims = { ...claims, sub: 'owner-google', email };
+  assert.equal(expect(await call('/auth/google', { method: 'POST', body: { credential: 'test-fixture' } }), 409).code, 'EMAIL_VERIFICATION_REQUIRED');
+  expect(await call('/auth/email-verification/request', { method: 'POST', body: { email } }), 200);
+  const linkProof = expect(await call('/auth/email-verification/verify', { method: 'POST', body: { email, code: await latestCode(email, 'Verify') } }), 200).emailVerificationToken;
+  assert.equal(expect(await call('/auth/google', { method: 'POST', body: { credential: 'test-fixture', emailVerificationToken: linkProof } }), 200).user._id, owner.user._id);
+  restoreGoogle(); restoreGoogle = null;
+  const lockedEmail = 'locked@example.test';
+  await call('/auth/email-verification/request', { method: 'POST', body: { email: lockedEmail } });
+  for (let index = 0; index < 5; index++) expect(await call('/auth/email-verification/verify', { method: 'POST', body: { email: lockedEmail, code: '000000' } }), 400);
+  expect(await call('/auth/email-verification/verify', { method: 'POST', body: { email: lockedEmail, code: await latestCode(lockedEmail, 'Verify') } }), 400);
+  const expiredEmail = 'expired@example.test';
+  await call('/auth/email-verification/request', { method: 'POST', body: { email: expiredEmail } });
+  const expiredCode = await latestCode(expiredEmail, 'Verify');
+  await EmailChallenge.updateOne({ email: expiredEmail }, { $set: { expiresAt: new Date(Date.now() - 1000) } });
+  expect(await call('/auth/email-verification/verify', { method: 'POST', body: { email: expiredEmail, code: expiredCode } }), 400);
+  expect(await call('/auth/login', { method: 'POST', body: { email, password }, headers: { origin: 'https://evil.example' } }), 403);
+  // Real local file upload and signed download authorization.
+  const channels = await Channel.find({ workspace: ws._id });
+  const form = new FormData(); form.set('workspaceId', ws._id); form.set('channelId', String(channels[0]._id));
+  form.append('files', new Blob([Buffer.from('89504e470d0a1a0a00000000', 'hex')], { type: 'image/png' }), 'test.png');
+  const uploadResponse = await fetch(`${base}/files/upload`, { method: 'POST', headers: { authorization: `Bearer ${outsider.accessToken}` }, body: form });
+  const uploaded = await uploadResponse.json(); assert.equal(uploadResponse.status, 201, JSON.stringify(uploaded));
+  assert.equal((await fetch(uploaded.attachments[0].url)).status, 200);
+  const tampered = new URL(uploaded.attachments[0].url); tampered.searchParams.set('user', owner.user._id);
+  assert.equal((await fetch(tampered)).status, 404);
+  expect(await call(`/workspaces/${second._id}`, { method: 'DELETE', token: outsider.accessToken, body: { confirmName: second.name } }), 403);
+  console.log('PASS: email verification, OTP expiry/attempt protection, recovery, Google linking policy, session rotation/revocation, workspace isolation/concurrent joins, local uploads, and origin checks.');
+}
+run().catch((error) => { console.error(error); process.exitCode = 1; }).finally(async () => {
+  restoreGoogle?.();
+  if (server) await new Promise((resolve) => server.close(resolve));
+  if (mongoose.connection.name === dbName) await mongoose.connection.dropDatabase();
+  await mongoose.disconnect();
+  if (directory) await fs.rm(directory, { recursive: true, force: true });
+});

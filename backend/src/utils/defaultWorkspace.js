@@ -2,9 +2,10 @@ const Workspace = require('../models/Workspace');
 const Channel = require('../models/Channel');
 const Message = require('../models/Message');
 const User = require('../models/User');
+const { isSuperAdmin } = require('../services/adminSecurity');
 
 const ALLOWED_REGISTRATION_DOMAIN = (
-  process.env.ALLOWED_REGISTRATION_DOMAIN || 'univisionz.com'
+  process.env.ALLOWED_REGISTRATION_DOMAIN || ''
 ).trim().toLowerCase();
 
 const DEFAULT_WORKSPACE_NAME = process.env.DEFAULT_WORKSPACE_NAME || 'Univisionz';
@@ -25,15 +26,7 @@ const DEFAULT_CHANNELS = [
 
 function isAllowedRegistrationEmail(email) {
   const normalizedEmail = String(email || '').trim().toLowerCase();
-  return normalizedEmail.endsWith(`@${ALLOWED_REGISTRATION_DOMAIN}`);
-}
-
-function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function getWorkspaceMemberRole(workspace, userId) {
-  return workspace.owner.toString() === userId.toString() ? 'owner' : 'member';
+  return !ALLOWED_REGISTRATION_DOMAIN || normalizedEmail.endsWith(`@${ALLOWED_REGISTRATION_DOMAIN}`);
 }
 
 function getChannelMemberRole(member) {
@@ -43,6 +36,12 @@ function getChannelMemberRole(member) {
 async function getOrCreateDefaultWorkspace(userId) {
   let workspace = await Workspace.findOne({ slug: DEFAULT_WORKSPACE_SLUG });
   let created = false;
+
+  if (workspace?.deletedAt) return { workspace: null, created: false };
+  if (!workspace) {
+    const user = await User.findById(userId).select('email role accountStatus');
+    if (!isSuperAdmin(user)) return { workspace: null, created: false };
+  }
 
   if (!workspace) {
     try {
@@ -62,35 +61,6 @@ async function getOrCreateDefaultWorkspace(userId) {
   }
 
   return { workspace, created };
-}
-
-async function syncDefaultWorkspaceMembers(workspace) {
-  const domainRegex = new RegExp(`@${escapeRegExp(ALLOWED_REGISTRATION_DOMAIN)}$`, 'i');
-  const eligibleUsers = await User.find({ email: domainRegex }).select('_id');
-  let changed = false;
-
-  for (const user of eligibleUsers) {
-    if (!workspace.isMember(user._id)) {
-      workspace.members.push({
-        user: user._id,
-        role: getWorkspaceMemberRole(workspace, user._id),
-      });
-      changed = true;
-    }
-  }
-
-  if (changed) {
-    await workspace.save();
-  }
-
-  if (eligibleUsers.length > 0) {
-    await User.updateMany(
-      { _id: { $in: eligibleUsers.map(user => user._id) } },
-      { $addToSet: { workspaces: workspace._id } },
-    );
-  }
-
-  return workspace;
 }
 
 async function ensureDefaultChannels(workspace) {
@@ -156,7 +126,14 @@ async function ensureDefaultChannels(workspace) {
 }
 
 async function ensureDefaultWorkspaceMembership(userId) {
+  // Open registration must never grant access to an existing team's conversations.
+  if (process.env.AUTO_JOIN_DEFAULT_WORKSPACE !== 'true' || !ALLOWED_REGISTRATION_DOMAIN) return null;
+  const joiningUser = await User.findById(userId).select('email role accountStatus');
+  if (!joiningUser || joiningUser.accountStatus === 'disabled' || (!isSuperAdmin(joiningUser) && !isAllowedRegistrationEmail(joiningUser.email))) return null;
   const { workspace } = await getOrCreateDefaultWorkspace(userId);
+  if (!workspace) return null;
+  // A shared email domain never substitutes for workspace administrator approval.
+  if (!workspace.isMember(userId) && String(workspace.owner) !== String(userId)) return null;
   let changed = false;
 
   if (!workspace.isMember(workspace.owner)) {
@@ -177,7 +154,7 @@ async function ensureDefaultWorkspaceMembership(userId) {
   }
 
   await User.findByIdAndUpdate(userId, { $addToSet: { workspaces: workspace._id } });
-  await syncDefaultWorkspaceMembers(workspace);
+  // Only synchronize the current member; do not scan every user on every request.
   await ensureDefaultChannels(workspace);
 
   return workspace;

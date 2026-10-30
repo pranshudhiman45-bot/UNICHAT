@@ -30,6 +30,7 @@ const channelSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 channelSchema.index({ workspace: 1, name: 1 }, { unique: true });
+channelSchema.index({ workspace: 1, 'members.user': 1 });
 
 function resolveUserId(value) {
   if (!value) return null;

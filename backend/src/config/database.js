@@ -1,16 +1,17 @@
 const mongoose = require('mongoose');
 
 const connectDB = async () => {
-  try {
-    const conn = await mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/unichat', {
-      serverSelectionTimeoutMS: 5000,
-    });
-    console.log(`✅ MongoDB connected: ${conn.connection.host}`);
-
-  } catch (err) {
-    console.error('❌ MongoDB connection error:', err.message);
-    process.exit(1);
+  const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI;
+  if (!mongoUri) {
+    throw new Error('MONGODB_URI is required');
   }
+
+  const conn = await mongoose.connect(mongoUri, {
+    serverSelectionTimeoutMS: 5000,
+  });
+
+  console.log(`MongoDB connected: ${conn.connection.name}`);
+  return conn;
 };
 
 module.exports = connectDB;

@@ -1,7 +1,10 @@
+require('dotenv').config();
 const mongoose = require('mongoose');
 
 async function fixIndex() {
-  await mongoose.connect('mongodb://localhost:27017/unichat');
+  const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI;
+  if (!mongoUri) throw new Error('MONGODB_URI is required');
+  await mongoose.connect(mongoUri);
   console.log('Connected to MongoDB');
   
   try {

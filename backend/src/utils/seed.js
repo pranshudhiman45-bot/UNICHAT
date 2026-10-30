@@ -1,32 +1,40 @@
 require('dotenv').config();
+const { assertSeedAllowed } = require('./seedGuard');
 const mongoose = require('mongoose');
 const User = require('../models/User');
 const Workspace = require('../models/Workspace');
 const Channel = require('../models/Channel');
 const Message = require('../models/Message');
+const DirectMessage = require('../models/DirectMessage');
+const Notification = require('../models/Notification');
+const StarredMessage = require('../models/StarredMessage');
 
 const seed = async () => {
-  await mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/unichat');
+  assertSeedAllowed(); // throws before any connection or deletion
+  const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI;
+  if (!mongoUri) throw new Error('MONGODB_URI is required');
+  await mongoose.connect(mongoUri);
   console.log('Connected to MongoDB');
 
   // Clear existing data
-  await Promise.all([User.deleteMany(), Workspace.deleteMany(), Channel.deleteMany(), Message.deleteMany()]);
+  await Promise.all([
+    User.deleteMany(),
+    Workspace.deleteMany(),
+    Channel.deleteMany(),
+    Message.deleteMany(),
+    DirectMessage.deleteMany(),
+    Notification.deleteMany(),
+    StarredMessage.deleteMany(),
+  ]);
   console.log('Cleared existing data');
 
   // Create users
-  const users = await User.insertMany([
+  const users = await User.create([
     { username: 'alexrivera', email: 'alex@unichat.com', password: 'password123', displayName: 'Alex Rivera', status: 'online', title: 'Lead Design Architect', bio: 'Designing systems that scale.' },
     { username: 'sarahchen', email: 'sarah@unichat.com', password: 'password123', displayName: 'Sarah Chen', status: 'online', title: 'Product Manager', bio: 'Building things people love.' },
     { username: 'jordantaylor', email: 'jordan@unichat.com', password: 'password123', displayName: 'Jordan Taylor', status: 'away', title: 'Senior Engineer' },
     { username: 'marcusthorne', email: 'marcus@unichat.com', password: 'password123', displayName: 'Marcus Thorne', status: 'busy', title: 'Backend Developer' },
   ]);
-
-  // Hash passwords
-  for (const u of users) {
-    const fresh = await User.findById(u._id).select('+password');
-    fresh.password = 'password123';
-    await fresh.save();
-  }
 
   console.log(`Created ${users.length} users`);
 

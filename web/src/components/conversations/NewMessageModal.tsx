@@ -1,0 +1,15 @@
+import { useMemo, useState } from 'react';
+import type { User } from '../../types';
+import Avatar from '../common/Avatar';
+import Modal from '../common/Modal';
+
+export default function NewMessageModal({ members, currentUserId, onClose, onCreate }: { members: User[]; currentUserId: string; onClose: () => void; onCreate: (participantIds: string[], isGroup: boolean) => Promise<void> }) {
+  const [query, setQuery] = useState('');
+  const [selected, setSelected] = useState<string[]>([]);
+  const [isGroup, setIsGroup] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const available = useMemo(() => members.filter((user) => user._id !== currentUserId && `${user.displayName} ${user.username}`.toLowerCase().includes(query.toLowerCase())), [members, query, currentUserId]);
+  const toggle = (id: string) => setSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : isGroup ? [...current, id] : [id]);
+  const submit = async () => { if ((!isGroup && selected.length !== 1) || (isGroup && selected.length < 2)) return; setIsSaving(true); try { await onCreate(selected, isGroup); } finally { setIsSaving(false); } };
+  return <Modal title="New message" onClose={onClose}><div className="mb-4 flex gap-2"><button onClick={() => { setIsGroup(false); setSelected([]); }} className={`border px-3 py-1.5 text-xs ${!isGroup ? 'border-[var(--accent)] bg-indigo-50 text-[var(--accent)]' : 'border-slate-200 text-slate-500'}`}>Direct message</button><button onClick={() => setIsGroup(true)} className={`border px-3 py-1.5 text-xs ${isGroup ? 'border-[var(--accent)] bg-indigo-50 text-[var(--accent)]' : 'border-slate-200 text-slate-500'}`}>Group DM</button></div><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search workspace members" className="mb-3 w-full border border-slate-300 px-3 py-2 text-sm outline-none focus:border-[var(--accent)]" /><div className="max-h-64 space-y-1 overflow-y-auto">{available.map((user) => <button key={user._id} onClick={() => toggle(user._id)} className={`flex w-full items-center gap-3 px-3 py-2 text-left ${selected.includes(user._id) ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}><Avatar user={user} size="sm" showPresence /><span className="min-w-0 flex-1"><span className="block text-xs font-medium text-slate-800">{user.displayName}</span><span className="block text-[10px] text-slate-400">{user.title || `@${user.username}`}</span></span>{selected.includes(user._id) && <span className="text-[var(--accent)]">✓</span>}</button>)}{available.length === 0 && <p className="py-6 text-center text-xs text-slate-400">No workspace members found.</p>}</div><div className="mt-5 flex justify-end gap-2"><button onClick={onClose} className="border border-slate-200 px-4 py-2 text-xs text-slate-600">Cancel</button><button onClick={() => void submit()} disabled={isSaving || selected.length < (isGroup ? 2 : 1)} className="bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-white disabled:opacity-40">{isSaving ? 'Opening…' : isGroup ? 'Start group' : 'Open message'}</button></div></Modal>;
+}

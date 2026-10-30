@@ -6,7 +6,26 @@
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
-    "seed": "node src/utils/seed.js"
+    "seed": "node src/utils/seed.js --confirm-destroy-all-data",
+    "test:smoke": "node scripts/smoke.js",
+    "test:admin": "node scripts/admin-smoke.js",
+    "test:regression-isolated": "node scripts/isolated-regression.js",
+    "hash:admin-password": "node scripts/hash-admin-password.js",
+    "test:workspace-approval": "node scripts/test-workspace-approval.cjs",
+    "test:auth": "node scripts/auth-workspace.test.js",
+    "test:startup": "node scripts/startup-smoke.js",
+    "test:redis": "node scripts/redis-smoke.js",
+    "test:seed-guard": "node scripts/seed-guard.test.js",
+    "test:sockets": "node scripts/socket-isolation.test.js",
+    "test": "node scripts/run-all.js",
+    "test:all": "node scripts/run-all.js",
+    "test:legacy": "npm run test:auth && npm run test:admin && npm run test:regression-isolated && npm run test:redis && npm run test:startup",
+    "db:indexes": "node scripts/ensure-indexes.js",
+    "test:data-model": "node scripts/data-model.test.js",
+    "lint": "node scripts/lint.js",
+    "check:prod-config": "node scripts/check-production-config.js",
+    "test:prod-config": "node scripts/prod-config.test.js",
+    "load": "node scripts/load/load-test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -20,10 +39,18 @@
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.5.1",
     "morgan": "^1.10.0",
-    "multer": "^1.4.5-lts.1",
-    "multer-storage-cloudinary": "^4.0.0",
+    "multer": "^2.0.2",
+    "nodemailer": "^10.0.13",
     "socket.io": "^4.7.5",
-    "uuid": "^10.0.0"
+    "uuid": "^11.1.1",
+    "web-push": "^3.6.7",
+    "google-auth-library": "^10.3.0",
+    "redis": "^5.0.0",
+    "@socket.io/redis-adapter": "^8.3.0",
+    "rate-limit-redis": "^4.2.0"
+  },
+  "overrides": {
+    "qs": "^6.16.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.4"

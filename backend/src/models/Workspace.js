@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { v4: uuidv4 } = require('uuid');
+const crypto = require('node:crypto');
 
 const memberSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -7,6 +7,14 @@ const memberSchema = new mongoose.Schema({
   joinedAt: { type: Date, default: Date.now },
   customDisplayName: { type: String },
 }, { _id: false });
+
+const joinRequestSchema = new mongoose.Schema({
+  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+  requestedAt: { type: Date, default: Date.now },
+  reviewedAt: Date,
+  reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+});
 
 const workspaceSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true, minlength: 2, maxlength: 80 },
@@ -16,7 +24,10 @@ const workspaceSchema = new mongoose.Schema({
   iconPublicId: { type: String, default: null },
   owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   members: [memberSchema],
-  inviteCode: { type: String, default: () => uuidv4().slice(0, 8).toUpperCase(), unique: true },
+  // Kept with membership so approval and admission are one atomic write,
+  // including on standalone MongoDB. Never expose applicants to ordinary members.
+  joinRequests: { type: [joinRequestSchema], default: [], select: false },
+  inviteCode: { type: String, default: () => crypto.randomBytes(8).toString('hex').toUpperCase(), unique: true },
   plan: { type: String, enum: ['free', 'pro', 'enterprise'], default: 'free' },
   settings: {
     defaultChannels: [{ type: String }],
@@ -24,7 +35,11 @@ const workspaceSchema = new mongoose.Schema({
     messageRetentionDays: { type: Number, default: 0 },
   },
   isArchived: { type: Boolean, default: false },
+  deletedAt: { type: Date, default: null },
 }, { timestamps: true });
+
+workspaceSchema.index({ 'members.user': 1 });
+workspaceSchema.index({ 'joinRequests.user': 1 });
 
 function resolveUserId(value) {
   if (!value) return null;
