@@ -14,6 +14,7 @@ Order matters because each side needs the other's URL: **database, then API, the
 | Variable | Value |
 |---|---|
 | `MONGODB_URI` | the Atlas string from step 1 |
+| `MONGODB_DB_NAME` | `unichat` (set by `render.yaml`; needed only if your URI has no database name) |
 | `PUBLIC_API_URL` | `https://<service-name>.onrender.com/api` |
 | `CLIENT_URL` and `ALLOWED_ORIGINS` | placeholder for now (`https://placeholder.vercel.app`); fixed in step 4 |
 
@@ -27,10 +28,13 @@ Secrets (`JWT_SECRET`, `JWT_REFRESH_SECRET`, `PASSWORD_RESET_PEPPER`) are genera
 
 ```env
 VITE_API_URL=https://<service-name>.onrender.com/api
+# Optional: defaults to the origin of VITE_API_URL
 VITE_SOCKET_URL=https://<service-name>.onrender.com
 ```
 
-   Use your real Render hostname and no trailing slash. The values are baked in at build time, so changing them later needs a redeploy.
+   Use your real Render hostname. The values are baked in at build time, so changing them later needs a redeploy. If
+   `VITE_API_URL` is missing or not `https://`, the Vercel build stops with an explanatory error instead of deploying a
+   site that calls itself.
 3. Deploy and note the URL, e.g. `https://unichat-xyz.vercel.app`.
 
 ## 4. Point the API at the web app
@@ -50,8 +54,15 @@ Open the Vercel URL, register, create a workspace, and send a message.
 
 ## Demo profile limits (what `render.yaml` sets)
 `NODE_ENV=staging` skips the production-only requirements so you can deploy without Cloudinary or SMTP:
-- Email verification is off, and password-reset codes are not emailed (`EMAIL_TRANSPORT=file`).
-- Uploads use the server disk (`FILE_STORAGE=local`), which Render's free tier erases on restart and redeploy.
+- Email verification is off (`REQUIRE_EMAIL_VERIFICATION=false`; production always enforces it).
+- `EMAIL_TRANSPORT=file` writes emails to the server disk, so nobody receives them. In the default `email` recovery
+  mode, **Forgot password cannot work** (the code never reaches the user). To keep password recovery usable, set
+  `PASSWORD_RECOVERY_MODE=admin` plus `ADMIN_EMAIL` / `ADMIN_PASSWORD_HASH`: the administrator approves the request in
+  `/admin` and can reveal the one-time code once, to pass on after verifying the person out of band.
+- Uploads use the server disk (`FILE_STORAGE=local`), which is ephemeral on Render: files are lost on every redeploy and
+  restart (and, per Render's community, when a free instance spins down). Messages keep pointing at the missing files.
+  Render persistent disks need a paid instance. Cloudinary works in staging too (`FILE_STORAGE=cloudinary` plus the
+  three `CLOUDINARY_*` variables) and does not depend on email.
 - Free Render services sleep after ~15 min idle; the first request then takes ~30-60 s. Open the API health URL before a demo to wake it.
 - No Redis, so run exactly one instance.
 
@@ -64,4 +75,6 @@ For a hardened production setup use `NODE_ENV=production` and configure Cloudina
 | Login works, but reload logs you out | `COOKIE_SAMESITE` not `none`, or you are using Safari |
 | "Failed to fetch" / long first load | Render free service is waking up |
 | Page 404 on refresh at `/chat/...` | Root Directory not set to `web` (so `vercel.json` is ignored) |
-| Live updates missing | `VITE_SOCKET_URL` wrong, or the frontend was not redeployed after changing it |
+| Live updates missing | `VITE_SOCKET_URL` wrong (or remove it to use the API origin), or the frontend was not redeployed |
+| Render log: `connected to the default "test" database` | add `/unichat` to `MONGODB_URI` or set `MONGODB_DB_NAME=unichat` |
+| Render log: `is a different site than the API` | set `COOKIE_SAMESITE=none` |

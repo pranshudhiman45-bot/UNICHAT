@@ -141,7 +141,7 @@ router.put('/password', authenticate, [
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ error: 'Use a password with at least 10 characters and at most 72 UTF-8 bytes' });
+    if (!errors.isEmpty()) return res.status(400).json({ error: `Use a password with at least ${require('../services/emailVerification').MIN_PASSWORD_LENGTH} characters and at most 72 UTF-8 bytes` });
     const user = await User.findById(req.userId).select('+password');
     if (!user) return res.status(404).json({ error: 'Not found' });
     if (user.role === 'SUPER_ADMIN') return res.status(403).json({ error: 'Administrator password is managed server-side' });

@@ -4,7 +4,9 @@ const { sendEmail } = require('./emailService');
 
 const normalizeEmail = (value) => typeof value === 'string' ? value.trim().toLowerCase() : '';
 const validEmail = (value) => typeof value === 'string' && value.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-const passwordValid = (value) => typeof value === 'string' && value.length >= 10 && Buffer.byteLength(value, 'utf8') <= 72;
+// Minimum length follows NIST SP 800-63B; bcrypt only uses the first 72 bytes, so longer input is rejected.
+const MIN_PASSWORD_LENGTH = 8;
+const passwordValid = (value) => typeof value === 'string' && value.length >= MIN_PASSWORD_LENGTH && Buffer.byteLength(value, 'utf8') <= 72;
 const verificationRequired = () => process.env.NODE_ENV === 'production' || process.env.REQUIRE_EMAIL_VERIFICATION !== 'false';
 
 async function requestEmailVerification(email) {
@@ -48,4 +50,4 @@ async function peekEmailProof(email, proof) {
   return Boolean(await EmailChallenge.exists({ email, proofHash: tokenHash(proof), verifiedAt: { $ne: null }, expiresAt: { $gt: new Date() } }));
 }
 
-module.exports = { peekEmailProof, normalizeEmail, validEmail, passwordValid, verificationRequired, requestEmailVerification, verifyEmailCode, consumeEmailProof };
+module.exports = { MIN_PASSWORD_LENGTH, peekEmailProof, normalizeEmail, validEmail, passwordValid, verificationRequired, requestEmailVerification, verifyEmailCode, consumeEmailProof };

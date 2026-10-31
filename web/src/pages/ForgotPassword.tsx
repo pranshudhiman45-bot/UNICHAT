@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import AuthLayout from '../components/auth/AuthLayout';
 import { api, useAuth } from '../hooks/useAuth';
+import { MIN_PASSWORD_LENGTH } from '../config';
 
 type Step = 'request' | 'code' | 'password' | 'done';
 const field = 'mt-1.5 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm text-[var(--text)] focus:border-[var(--accent)] focus:outline-none';
@@ -32,7 +33,7 @@ export default function ForgotPassword() {
         setCode('');
         setStep('password');
       } else if (step === 'password') {
-        if (password.length < 10 || password !== confirmPassword) { setError('Passwords must match and be at least 10 characters.'); return; }
+        if (password.length < MIN_PASSWORD_LENGTH || password !== confirmPassword) { setError(`Passwords must match and be at least ${MIN_PASSWORD_LENGTH} characters.`); return; }
         await api.post('/auth/password-resets/complete', { email: email.trim(), resetToken, password, confirmPassword });
         setResetToken(''); setPassword(''); setConfirmPassword(''); setStep('done');
       }
@@ -60,7 +61,7 @@ export default function ForgotPassword() {
       <form onSubmit={(event) => void submit(event)} className="space-y-4">
         {step === 'request' && <label className="block text-sm font-medium text-[var(--text-secondary)]">Account email<input className={field} type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required maxLength={254} /></label>}
         {step === 'code' && <label className="block text-sm font-medium text-[var(--text-secondary)]">Six-digit recovery code<input className={`${field} font-mono text-center text-lg tracking-[.35em]`} type="text" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="one-time-code" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} required aria-describedby="code-help" /><span id="code-help" className="mt-1 block text-xs text-[var(--text-muted)]">{adminMode ? 'Use the code provided by your administrator.' : 'Codes expire in 10 minutes. Only the most recent code works.'}</span></label>}
-        {step === 'password' && <><label className="block text-sm font-medium text-[var(--text-secondary)]">New password<input className={field} type="password" autoComplete="new-password" minLength={10} value={password} onChange={(event) => setPassword(event.target.value)} required /></label><label className="block text-sm font-medium text-[var(--text-secondary)]">Confirm new password<input className={field} type="password" autoComplete="new-password" minLength={10} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></label></>}
+        {step === 'password' && <><label className="block text-sm font-medium text-[var(--text-secondary)]">New password<input className={field} type="password" autoComplete="new-password" minLength={MIN_PASSWORD_LENGTH} value={password} onChange={(event) => setPassword(event.target.value)} required /></label><label className="block text-sm font-medium text-[var(--text-secondary)]">Confirm new password<input className={field} type="password" autoComplete="new-password" minLength={MIN_PASSWORD_LENGTH} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></label></>}
         <button type="submit" disabled={busy} className="w-full rounded-md bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-50">{busy ? 'Please wait…' : step === 'request' ? 'Send recovery code' : step === 'code' ? 'Verify code' : 'Update password'}</button>
         {step === 'code' && <div className="flex justify-between text-sm"><button type="button" onClick={() => { setStep('request'); setError(''); }}>Change email</button><button type="button" disabled={busy || remaining > 0} className="auth-link disabled:opacity-50" onClick={async () => { setBusy(true); setError(''); try { await api.post('/auth/password-resets/request', { email: email.trim() }); setRemaining(60); setCode(''); } catch { setError('Unable to resend. Please try again later.'); } finally { setBusy(false); } }}>{remaining ? `Resend in ${remaining}s` : 'Resend code'}</button></div>}
       </form>}

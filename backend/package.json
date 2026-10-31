@@ -3,9 +3,12 @@
   "version": "1.0.0",
   "description": "Unichat - Industry-grade Slack-like backend",
   "main": "src/index.js",
+  "engines": {
+    "node": ">=22.12"
+  },
   "scripts": {
-    "dev": "nodemon src/index.js",
-    "start": "node src/index.js",
+    "dev": "node init && nodemon src/index.js",
+    "start": "node init && node src/index.js",
     "seed": "node src/utils/seed.js --confirm-destroy-all-data",
     "test:smoke": "node scripts/smoke.js",
     "test:admin": "node scripts/admin-smoke.js",

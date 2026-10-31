@@ -8,7 +8,7 @@
   "scripts": {
     "setup:local": "node scripts/setup-local.cjs",
     "seed:local": "node scripts/seed-local.cjs",
-    "dev": "node scripts/dev.cjs",
+    "dev": "node init && node scripts/dev.cjs",
     "check": "npm --prefix web run build && node --test shared/workspaceAvatar.test.mjs web/src/utils/messageGrouping.test.mjs",
     "test:auth": "npm --prefix backend run test:auth",
     "test:e2e": "playwright test",
