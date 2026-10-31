@@ -4,6 +4,7 @@ import AuthLayout from '../components/auth/AuthLayout';
 import GoogleSignIn from '../components/auth/GoogleSignIn';
 import EmailVerification from '../components/auth/EmailVerification';
 import { api, useAuth } from '../hooks/useAuth';
+import { MIN_PASSWORD_LENGTH } from '../config';
 
 type Field = 'username' | 'email' | 'password' | 'displayName';
 export default function Register() {
@@ -27,9 +28,9 @@ export default function Register() {
     event.preventDefault(); setError('');
     const invalid: Partial<Record<Field, string>> = {};
     if (!form.displayName.trim() || form.displayName.trim().length > 50) invalid.displayName = 'Enter your full name (1–50 characters).';
-    if (!/^[a-zA-Z0-9_.-]{2,30}$/.test(form.username.trim())) invalid.username = 'Choose a username such as pranshu45. Use 2–30 letters, numbers, dots, underscores or hyphens; no @ or spaces.';
+    if (!/^[a-zA-Z0-9_.-]{2,30}$/.test(form.username.trim())) invalid.username = 'Choose a username such as jordan.lee. Use 2–30 letters, numbers, dots, underscores or hyphens; no @ or spaces.';
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) invalid.email = 'Enter a valid email address.';
-    if (form.password.length < 10) invalid.password = 'Your password needs at least 10 characters.';
+    if (form.password.length < MIN_PASSWORD_LENGTH) invalid.password = `Your password needs at least ${MIN_PASSWORD_LENGTH} characters.`;
     else if (new TextEncoder().encode(form.password).length > 72) invalid.password = 'Your password is too long. Use at most 72 UTF-8 bytes.';
     setFieldErrors(invalid);
     const first = Object.keys(invalid)[0] as Field | undefined;
@@ -62,8 +63,8 @@ export default function Register() {
             {fieldError('displayName')}
           </label>
           <label className="auth-label" htmlFor="register-username">Username
-            <input {...accessibility('username')} className="auth-input" autoComplete="username" autoCapitalize="none" spellCheck={false} placeholder="pranshu45" maxLength={30} value={form.username} onChange={event => update('username', event.target.value)} required/>
-            <span id="username-hint" className="mt-2 block text-xs font-normal text-[var(--text-muted)]">Your unique handle, e.g. pranshu45.</span>
+            <input {...accessibility('username')} className="auth-input" autoComplete="username" autoCapitalize="none" spellCheck={false} placeholder="jordan.lee" maxLength={30} value={form.username} onChange={event => update('username', event.target.value)} required/>
+            <span id="username-hint" className="mt-2 block text-xs font-normal text-[var(--text-muted)]">Your unique handle, e.g. jordan.lee.</span>
             {fieldError('username')}
           </label>
         </div>
@@ -72,8 +73,8 @@ export default function Register() {
           {fieldError('email')}
         </label>
         <label className="auth-label" htmlFor="register-password">Password
-          <input {...accessibility('password')} className="auth-input" type="password" aria-label="Password" autoComplete="new-password" minLength={10} maxLength={72} value={form.password} onChange={event => update('password', event.target.value)} required/>
-          <span id="password-hint" className="mt-2 block text-xs font-normal text-[var(--text-muted)]">Use at least 10 characters. A memorable passphrase works well.</span>
+          <input {...accessibility('password')} className="auth-input" type="password" aria-label="Password" autoComplete="new-password" minLength={MIN_PASSWORD_LENGTH} maxLength={72} value={form.password} onChange={event => update('password', event.target.value)} required/>
+          <span id="password-hint" className="mt-2 block text-xs font-normal text-[var(--text-muted)]">Use at least {MIN_PASSWORD_LENGTH} characters. A memorable passphrase works well.</span>
           {fieldError('password')}
         </label>
         <button disabled={saving} className="auth-submit">{saving ? 'Please wait…' : 'Create your account'}</button>

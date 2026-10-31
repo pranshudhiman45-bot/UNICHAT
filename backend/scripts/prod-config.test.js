@@ -38,7 +38,8 @@ function start(env) {
     const child = spawn(process.execPath, ['src/index.js'], { cwd: backend, env: { PATH: process.env.PATH, ...env, PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
     let output = ''; let settled = false;
     const done = (value) => { if (!settled) { settled = true; resolve({ ...value, output, port, stop: () => child.kill('SIGKILL') }); } };
-    child.stdout.on('data', (c) => { output += c; if (/Socket\.IO server ready/.test(output)) done({ exited: false }); });
+    // Wait for the last startup line; resolving on an earlier one raced the remaining log lines under load.
+    child.stdout.on('data', (c) => { output += c; if (/Environment: \S+/.test(output)) done({ exited: false }); });
     child.stderr.on('data', (c) => { output += c; });
     child.on('exit', (code) => done({ exited: true, code }));
     setTimeout(() => { child.kill('SIGKILL'); done({ exited: true, code: 'timeout' }); }, 20000);

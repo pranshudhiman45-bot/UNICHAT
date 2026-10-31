@@ -1,6 +1,5 @@
 import { io, Socket } from 'socket.io-client';
-
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || window.location.origin;
+import { SOCKET_URL } from '../config';
 
 let refreshSession: (() => Promise<void>) | null = null;
 export function setSocketSessionRefresher(callback: () => Promise<void>) { refreshSession = callback; }

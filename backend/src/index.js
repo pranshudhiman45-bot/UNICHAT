@@ -36,7 +36,8 @@ const { migrateStarredToSaved } = require('./utils/migrations');
 const PORT = Number(process.env.PORT || 4000);
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || process.env.CLIENT_URL || '')
   .split(',')
-  .map((origin) => origin.trim())
+  // Browsers send Origin without a trailing slash; tolerate "https://app.example/" in configuration.
+  .map((origin) => origin.trim().replace(/\/+$/, ''))
   .filter(Boolean);
 
 function validateConfig() {
@@ -48,9 +49,13 @@ function validateConfig() {
   if (missing.length) {
     throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
   }
-  if (process.env.NODE_ENV === 'production' && (process.env.JWT_SECRET.length < 32 || process.env.JWT_REFRESH_SECRET.length < 32)) {
-    throw new Error('JWT_SECRET and JWT_REFRESH_SECRET must each contain at least 32 characters in production');
+  // Any internet-facing deployment (production, or a staging/demo profile served over HTTPS) needs strong, distinct
+  // signing secrets; plain-HTTP local development keeps its short test secrets.
+  const deployed = process.env.NODE_ENV === 'production' || /^https:\/\//i.test(process.env.PUBLIC_API_URL || '');
+  if (deployed && (process.env.JWT_SECRET.length < 32 || process.env.JWT_REFRESH_SECRET.length < 32)) {
+    throw new Error('JWT_SECRET and JWT_REFRESH_SECRET must each contain at least 32 characters when deployed');
   }
+  if (deployed && process.env.JWT_SECRET === process.env.JWT_REFRESH_SECRET) throw new Error('Use distinct access and refresh signing secrets');
   if (Boolean(process.env.ADMIN_EMAIL) !== Boolean(process.env.ADMIN_PASSWORD_HASH)) throw new Error('ADMIN_EMAIL and ADMIN_PASSWORD_HASH must be configured together');
   if (process.env.ADMIN_PASSWORD_HASH && !/^\$2[aby]\$(?:1[2-9]|2\d|3[01])\$[./A-Za-z0-9]{53}$/.test(process.env.ADMIN_PASSWORD_HASH)) throw new Error('ADMIN_PASSWORD_HASH must be a bcrypt hash with cost 12 or higher');
   if (process.env.NODE_ENV === 'production' && (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD_HASH)) throw new Error('Admin credentials are required in production');
@@ -66,6 +71,16 @@ function validateConfig() {
     if (process.env.JWT_SECRET === process.env.JWT_REFRESH_SECRET) throw new Error('Use distinct access and refresh signing secrets');
     if (!allowedOrigins.length || allowedOrigins.some((origin) => !origin.startsWith('https://'))) throw new Error('Configure HTTPS ALLOWED_ORIGINS');
   }
+}
+
+// A web app on another site (e.g. *.vercel.app calling *.onrender.com) only keeps its refresh cookie with
+// COOKIE_SAMESITE=none. Without it, sign-in works but every reload signs the user out, so say so at startup.
+function warnIfCrossSiteCookieMisconfigured() {
+  if (process.env.COOKIE_SAMESITE === 'none' || !process.env.PUBLIC_API_URL) return;
+  const site = (url) => { try { return new URL(url).hostname.split('.').slice(-2).join('.'); } catch { return null; } };
+  const apiSite = site(process.env.PUBLIC_API_URL);
+  const crossSite = allowedOrigins.filter((origin) => site(origin) && site(origin) !== apiSite);
+  if (crossSite.length) console.warn(`WARNING: ${crossSite.join(', ')} is a different site than the API (${apiSite}). Set COOKIE_SAMESITE=none or users will be signed out on every reload.`);
 }
 
 function isAllowedOrigin(origin) {
@@ -171,6 +186,7 @@ function installProcessSafetyNets() {
 async function startServer() {
   try {
     validateConfig();
+    warnIfCrossSiteCookieMisconfigured();
     installProcessSafetyNets();
     await connectDB();
     await connectRedis(io);
@@ -184,7 +200,7 @@ async function startServer() {
       httpServer.listen(PORT);
     });
     stopCleanup = startCleanupScheduler();
-    console.log(`HTTP API running: http://localhost:${PORT}`);
+    console.log(`HTTP API listening on port ${PORT}`);
     console.log('Socket.IO server ready');
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
     const shutdown = () => {

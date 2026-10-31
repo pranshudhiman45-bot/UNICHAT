@@ -14,7 +14,7 @@ const authenticate = async (req, res, next) => {
       return res.status(401).json({ error: 'No token provided' });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
     
     const user = await User.findById(decoded.userId).select('+refreshSessions');
     if (!user || user.accountStatus === 'disabled' || !validAdminToken(user, decoded) || (decoded.ver || 0) !== (user.sessionVersion || 0) || (decoded.sid && !user.refreshSessions.some((session) => session.sessionId === decoded.sid))) {
@@ -37,7 +37,7 @@ const optionalAuth = async (req, res, next) => {
   try {
     const token = bearerToken(req);
     if (token) {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
       const user = await User.findById(decoded.userId).select('+refreshSessions');
       if (user && user.accountStatus !== 'disabled' && validAdminToken(user, decoded) && (decoded.ver || 0) === (user.sessionVersion || 0) && (!decoded.sid || user.refreshSessions.some((session) => session.sessionId === decoded.sid))) {
         req.user = user;
