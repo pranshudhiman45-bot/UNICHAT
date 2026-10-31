@@ -70,7 +70,9 @@ else add('CORRECT', 'ALLOWED_ORIGINS', `${origins.length} exact https origin(s),
 if (has('CLIENT_URL')) add(isHttps(get('CLIENT_URL')) && !isLocalHost(get('CLIENT_URL')) ? 'CORRECT' : 'UNSAFE', 'CLIENT_URL', 'must be a public https URL');
 const hops = Number(get('TRUST_PROXY_HOPS') || 0);
 add(Number.isInteger(hops) && hops >= 1 ? 'CORRECT' : 'UNSAFE', 'TRUST_PROXY_HOPS', Number.isInteger(hops) && hops >= 1 ? `${hops} trusted proxy hop(s): verify it equals the exact number of proxies in front of the API` : '0/unset: behind a load balancer all clients share one IP, which collapses per-IP rate limits and audit logs; also makes req.secure false so every API call is rejected with 426');
-add('INFO', 'cookies', 'refresh cookie is HttpOnly + SameSite=Strict + Secure (when NODE_ENV=production) + Path=/api/auth; set by code, no variable');
+if (!has('COOKIE_SAMESITE')) add('INFO', 'COOKIE_SAMESITE', 'unset: refresh cookie is HttpOnly + SameSite=Strict + Secure (production) + Path=/api/auth. Set "none" only if the web app is on a different site than the API');
+else if (get('COOKIE_SAMESITE') === 'none') add('CORRECT', 'COOKIE_SAMESITE', 'none: cross-site refresh cookie (HttpOnly + Secure + Path=/api/auth); CSRF still blocked by the exact CORS allowlist + JSON-only auth routes');
+else add('UNSAFE', 'COOKIE_SAMESITE', `unsupported value "${get('COOKIE_SAMESITE')}": use "none" or leave unset`);
 
 // --- datastores -------------------------------------------------------------------------------------------------
 const mongo = get('MONGODB_URI') || get('MONGO_URI');

@@ -15,7 +15,7 @@ function ipKeyGenerator(ip) {
 function verifiedUserId(req) {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) return null;
-  try { return String(jwt.verify(header.slice(7), process.env.JWT_SECRET).userId); } catch { return null; }
+  try { return String(jwt.verify(header.slice(7), process.env.JWT_SECRET, { algorithms: ['HS256'] }).userId); } catch { return null; }
 }
 
 function requestKey(req) {

@@ -50,7 +50,7 @@ const PRESENCE_GRACE_MS = Number(process.env.PRESENCE_GRACE_MS ?? 8000);
 module.exports = (io) => {
   async function verifyToken(token) {
     if (!token || typeof token !== 'string') throw new Error('No token');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
     const user = await User.findById(decoded.userId).select('+refreshSessions');
     if (!user || user.accountStatus === 'disabled' || !validAdminToken(user, decoded) || (decoded.ver || 0) !== (user.sessionVersion || 0) || (decoded.sid && !user.refreshSessions.some((session) => session.sessionId === decoded.sid))) throw new Error('Unauthorized');
     return { user, decoded };

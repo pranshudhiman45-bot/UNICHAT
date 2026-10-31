@@ -111,7 +111,7 @@ export default function MessageComposer({ placeholder, disabled, typingText, mem
     if (parentMessageId) form.append('parentMessageId', parentMessageId);
     form.append('files', item.file);
     try {
-      const response = await api.post('/files/upload', form, { onUploadProgress: (event) => { const progress = event.total ? Math.round((event.loaded / event.total) * 100) : 0; setSelected((current) => current.map((entry) => entry.id === item.id ? { ...entry, progress } : entry)); } });
+      const response = await api.post('/files/upload', form, { timeout: 0, onUploadProgress: (event) => { const progress = event.total ? Math.round((event.loaded / event.total) * 100) : 0; setSelected((current) => current.map((entry) => entry.id === item.id ? { ...entry, progress } : entry)); } });
       const attachment = response.data.attachments?.[0] as Attachment | undefined;
       if (!attachment) throw new Error('Upload did not return an attachment');
       setSelected((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: 'uploaded', progress: 100, attachment } : entry));

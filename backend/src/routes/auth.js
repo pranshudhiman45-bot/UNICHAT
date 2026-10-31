@@ -13,7 +13,7 @@ const {
 } = require('../utils/defaultWorkspace');
 
 const { readCookie, isCookieClient, refreshCookieOptions, sendTokens, hashRefreshToken, generateTokens, createSession } = require('../services/authSessions');
-const { passwordValid, verificationRequired, consumeEmailProof, peekEmailProof } = require('../services/emailVerification');
+const { MIN_PASSWORD_LENGTH, passwordValid, verificationRequired, consumeEmailProof, peekEmailProof } = require('../services/emailVerification');
 const bcrypt = require('bcryptjs');
 
 // bcrypt takes ~250ms. Comparing against a throwaway hash when the email is unknown keeps the response time
@@ -28,8 +28,8 @@ const loginLimiter = limiter('login', { windowMs: 15 * 60 * 1000, limit: 10, sta
 // POST /api/auth/register
 router.post('/register', loginLimiter, [
   body('email').isString().withMessage('Enter a valid email address').bail().trim().toLowerCase().isEmail().withMessage('Enter a valid email address'),
-  body('password').custom(passwordValid).withMessage('Use at least 10 characters and at most 72 UTF-8 bytes'),
-  body('username').isString().withMessage('Enter a username').bail().trim().toLowerCase().isLength({ min: 2, max: 30 }).withMessage('Username must contain 2–30 characters').bail().matches(/^[a-zA-Z0-9_.-]+$/).withMessage('Username can only contain letters, numbers, dots, underscores or hyphens. Use a name such as pranshu45, not an email address.'),
+  body('password').custom(passwordValid).withMessage(`Use at least ${MIN_PASSWORD_LENGTH} characters and at most 72 UTF-8 bytes`),
+  body('username').isString().withMessage('Enter a username').bail().trim().toLowerCase().isLength({ min: 2, max: 30 }).withMessage('Username must contain 2–30 characters').bail().matches(/^[a-zA-Z0-9_.-]+$/).withMessage('Username can only contain letters, numbers, dots, underscores or hyphens. Use a name such as jordan.lee, not an email address.'),
   body('displayName').isString().withMessage('Enter your full name').bail().trim().isLength({ min: 1, max: 50 }).withMessage('Full name must contain 1–50 characters'),
 ], async (req, res) => {
   try {
@@ -127,7 +127,7 @@ router.post('/refresh', async (req, res) => {
       return res.status(401).json({ error: 'Refresh token required' });
     }
 
-    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET, { algorithms: ['HS256'] });
     const user = await User.findById(decoded.userId).select('+refreshToken +refreshSessions');
     const presentedHash = hashRefreshToken(refreshToken);
     const graceCutoff = Date.now() - refreshReuseWindowMs();
